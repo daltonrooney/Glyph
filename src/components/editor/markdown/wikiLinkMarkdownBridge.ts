@@ -15,6 +15,12 @@ import {
 	isEditorTextHighlight,
 } from "../textHighlights";
 import { postprocessDetailsMarkdown, preprocessDetailsMarkdown } from "./detailsMarkdown";
+import {
+	FOOTNOTE_PATTERN,
+	decodeFootnoteBridge,
+	encodeFootnoteBridge,
+	findFootnoteDefinitionSpans,
+} from "./footnote";
 import { postprocessHtmlEmbeds, preprocessHtmlEmbeds } from "./htmlEmbedMarkdown";
 import { postprocessInlineTocMarkers, preprocessInlineTocMarkers } from "./inlineTocMarkdown";
 import { transformMarkdownOutsideCode, transformMarkdownOutsideFences } from "./markdownFence";
@@ -51,6 +57,55 @@ function restoreEscapedBracketSyntax(input: string): string {
 		text
 			.replace(/^(\s*>\s*)\\\[!([\w-]+)\\\]([+-]?)(?=\s|$)/, "$1[!$2]$3")
 			.replace(/\\\[\\\[([^\n]*?)\\\]\\\]/g, "[[$1]]"),
+	);
+}
+
+const FOOTNOTE_BRIDGE_TOKEN_RE = /\{\{glyph-footnote-(?:ref|def):[0-9a-f]*\}\}/g;
+
+function hasOddLeadingBackslashes(text: string, index: number): boolean {
+	let backslashes = 0;
+	for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+		backslashes += 1;
+	}
+	return backslashes % 2 === 1;
+}
+
+function protectFootnoteDefinitions(input: string): string {
+	const spans = findFootnoteDefinitionSpans(input);
+	if (!spans.length) return input;
+
+	let out = "";
+	let cursor = 0;
+	for (const span of spans) {
+		out += input.slice(cursor, span.start);
+		out += encodeFootnoteBridge("def", span.raw);
+		cursor = span.end;
+	}
+	out += input.slice(cursor);
+	return out;
+}
+
+function protectFootnoteReferences(input: string): string {
+	return transformMarkdownOutsideCode(input, (text) =>
+		text.replace(FOOTNOTE_PATTERN, (match: string, _id: string, offset: number) =>
+			hasOddLeadingBackslashes(text, offset) ? match : encodeFootnoteBridge("ref", match),
+		),
+	);
+}
+
+/** Shield footnote syntax from Marked and the Tiptap text serializer. */
+function preprocessFootnotes(input: string): string {
+	if (!input.includes("[^")) return input;
+	return protectFootnoteReferences(protectFootnoteDefinitions(input));
+}
+
+function postprocessFootnotes(input: string): string {
+	if (!input.includes("{{glyph-footnote-")) return input;
+	return transformMarkdownOutsideCode(input, (text) =>
+		text.replace(
+			FOOTNOTE_BRIDGE_TOKEN_RE,
+			(match: string) => decodeFootnoteBridge(match)?.raw ?? match,
+		),
 	);
 }
 
@@ -155,7 +210,9 @@ export function preprocessMarkdownForEditor(markdown: string): string {
 			preprocessHighlightedText(
 				encodeMarkdownImageDestinations(
 					canonicalizeWikiLinks(
-						preprocessDetailsMarkdown(preprocessHtmlEmbeds(preprocessInlineTocMarkers(markdown))),
+						preprocessDetailsMarkdown(
+							preprocessHtmlEmbeds(preprocessInlineTocMarkers(preprocessFootnotes(markdown))),
+						),
 					),
 				),
 			),
@@ -170,7 +227,9 @@ export function postprocessMarkdownFromEditor(markdown: string): string {
 				postprocessHighlightedText(
 					postprocessColoredText(
 						postprocessDetailsMarkdown(
-							postprocessHtmlEmbeds(canonicalizeWikiLinks(restoreEscapedBracketSyntax(markdown))),
+							postprocessHtmlEmbeds(
+								canonicalizeWikiLinks(restoreEscapedBracketSyntax(postprocessFootnotes(markdown))),
+							),
 						),
 					),
 				),

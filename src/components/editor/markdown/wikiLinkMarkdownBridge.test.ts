@@ -214,3 +214,33 @@ describe("findFootnoteDefinitionSpans", () => {
 		expect(findFootnoteDefinitionSpans(markdown)).toEqual([]);
 	});
 });
+
+describe("footnote markdown bridge", () => {
+	it("protects references outside code", () => {
+		expect(preprocessMarkdownForEditor("Text[^note].")).toBe(
+			`Text${encodeFootnoteBridge("ref", "[^note]")}.`,
+		);
+	});
+
+	it("protects a complete definition block including continuation lines", () => {
+		const definition = "[^long]: First line.\n    Continued with **Markdown**.";
+		expect(preprocessMarkdownForEditor(`Intro.\n\n${definition}`)).toBe(
+			`Intro.\n\n${encodeFootnoteBridge("def", definition)}`,
+		);
+	});
+
+	it("leaves code and deliberately escaped literals untouched", () => {
+		const md =
+			"`[^not-a-footnote]`\n\n```md\n[^not-a-footnote]: literal\n```\n\n" +
+			String.raw`\[^literal\]`;
+		expect(preprocessMarkdownForEditor(md)).toBe(md);
+	});
+
+	it("restores protected footnotes and keeps lookalike tokens literal", () => {
+		const md = "Text[^note].\n\n[^note]: Definition.";
+		expect(postprocessMarkdownFromEditor(preprocessMarkdownForEditor(md))).toBe(md);
+		expect(postprocessMarkdownFromEditor("{{glyph-footnote-ref:zz}} stays")).toBe(
+			"{{glyph-footnote-ref:zz}} stays",
+		);
+	});
+});
