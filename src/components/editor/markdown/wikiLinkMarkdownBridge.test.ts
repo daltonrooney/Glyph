@@ -244,3 +244,40 @@ describe("footnote markdown bridge", () => {
 		);
 	});
 });
+
+describe("footnote preservation nodes", () => {
+	function findNodeByType(
+		value: unknown,
+		type: string,
+	): { type?: string; attrs?: Record<string, unknown> } | null {
+		if (!value || typeof value !== "object") return null;
+		const node = value as {
+			type?: string;
+			attrs?: Record<string, unknown>;
+			content?: unknown[];
+		};
+		if (node.type === type) return node;
+		for (const child of node.content ?? []) {
+			const found = findNodeByType(child, type);
+			if (found) return found;
+		}
+		return null;
+	}
+
+	it("parses references into atomic nodes holding the original source", () => {
+		const manager = createMarkdownManager();
+		const json = manager.parse(preprocessMarkdownForEditor("Text[^my_note.v2-1]."));
+		expect(findNodeByType(json, "footnoteReferencePreservation")?.attrs).toEqual({
+			raw: "[^my_note.v2-1]",
+		});
+	});
+
+	it("parses definitions into atomic nodes holding the complete original block", () => {
+		const definition = "[^long]: First line.\n    Continued with **Markdown**.";
+		const manager = createMarkdownManager();
+		const json = manager.parse(preprocessMarkdownForEditor(`Intro.\n\n${definition}`));
+		expect(findNodeByType(json, "footnoteDefinitionPreservation")?.attrs).toEqual({
+			raw: definition,
+		});
+	});
+});

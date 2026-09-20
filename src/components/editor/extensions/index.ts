@@ -24,6 +24,10 @@ import { glyphDetailsExtensions } from "./detailsBlock";
 import { ExternalLinkPreviews } from "./externalLinkPreviews";
 import { FocusModeDecorations } from "./focusModeDecorations";
 import { FootnoteDecorations } from "./footnoteDecorations";
+import {
+	FootnoteDefinitionPreservation,
+	FootnoteReferencePreservation,
+} from "./footnotePreservation";
 import { HeadingCollapse } from "./headingCollapse";
 import { HighlightedText } from "./highlightedText";
 import { HtmlEmbedPreview } from "./htmlEmbedPreview";
@@ -646,6 +650,8 @@ export function createEditorExtensions(options?: CreateEditorExtensionsOptions) 
 		MermaidPreview,
 		InlineTableOfContents,
 		headingCollapse,
+		FootnoteReferencePreservation,
+		FootnoteDefinitionPreservation,
 		Markdown.configure({
 			markedOptions: {
 				gfm: true,
