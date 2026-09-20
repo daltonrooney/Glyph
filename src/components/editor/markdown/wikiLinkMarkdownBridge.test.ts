@@ -119,6 +119,7 @@ describe("footnote preservation round trips", () => {
 		["multiline definition", "[^long]: First line.\n    Continued with **Markdown**."],
 		["repeated reference", "One[^same] and two[^same]."],
 		["reference plus definition", "Text[^note].\n\n[^note]: Definition."],
+		["definitions on consecutive lines", "[^a]: One.\n[^b]: Two."],
 		["inline code", "`[^not-a-footnote]`"],
 		["fenced code", "```md\n[^not-a-footnote]: literal\n```"],
 		["deliberately escaped literal", String.raw`\[^literal\]`],
@@ -175,11 +176,19 @@ describe("footnote bridge codec", () => {
 		expect(decodeFootnoteBridge(` ${encodeFootnoteBridge("ref", "[^note]")}`)).toBeNull();
 	});
 
+	it("accepts definitions that sit on consecutive lines", () => {
+		const raw = "[^a]: One.\n[^b]: Two.";
+		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", raw))?.raw).toBe(raw);
+	});
+
 	it("rejects payloads that do not match their claimed kind", () => {
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("ref", "[^note]: Definition."))).toBeNull();
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", "[^note]"))).toBeNull();
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("ref", "text [^note] text"))).toBeNull();
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", "  [^note]: Indented."))).toBeNull();
+		expect(
+			decodeFootnoteBridge(encodeFootnoteBridge("def", "[^a]: One.\n\nParagraph.\n\n[^b]: Two.")),
+		).toBeNull();
 	});
 });
 

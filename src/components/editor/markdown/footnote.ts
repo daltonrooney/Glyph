@@ -91,8 +91,14 @@ function hexToBytes(hex: string): Uint8Array | null {
 function isFootnoteBridgeSource(kind: FootnoteBridgeKind, raw: string): boolean {
 	if (kind === "ref") return FOOTNOTE_REFERENCE_RE.test(raw);
 	const spans = findFootnoteDefinitionSpans(raw);
-	const span = spans[0];
-	return spans.length === 1 && span !== undefined && span.start === 0 && span.end === raw.length;
+	if (!spans.length) return false;
+
+	let cursor = 0;
+	for (const span of spans) {
+		if (span.start !== cursor) return false;
+		cursor = span.end + 1;
+	}
+	return cursor === raw.length + 1;
 }
 
 export function encodeFootnoteBridge(kind: FootnoteBridgeKind, raw: string): string {

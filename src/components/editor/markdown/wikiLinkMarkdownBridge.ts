@@ -17,6 +17,7 @@ import {
 import { postprocessDetailsMarkdown, preprocessDetailsMarkdown } from "./detailsMarkdown";
 import {
 	FOOTNOTE_PATTERN,
+	type FootnoteDefinitionSpan,
 	decodeFootnoteBridge,
 	encodeFootnoteBridge,
 	findFootnoteDefinitionSpans,
@@ -70,8 +71,29 @@ function hasOddLeadingBackslashes(text: string, index: number): boolean {
 	return backslashes % 2 === 1;
 }
 
+/** Keep definitions on consecutive lines in one block so serialization cannot split them. */
+function mergeAdjacentDefinitionSpans(
+	input: string,
+	spans: FootnoteDefinitionSpan[],
+): FootnoteDefinitionSpan[] {
+	const merged: FootnoteDefinitionSpan[] = [];
+	for (const span of spans) {
+		const previous = merged[merged.length - 1];
+		if (previous && input[previous.end] === "\n" && span.start === previous.end + 1) {
+			merged[merged.length - 1] = {
+				start: previous.start,
+				end: span.end,
+				raw: input.slice(previous.start, span.end),
+			};
+			continue;
+		}
+		merged.push(span);
+	}
+	return merged;
+}
+
 function protectFootnoteDefinitions(input: string): string {
-	const spans = findFootnoteDefinitionSpans(input);
+	const spans = mergeAdjacentDefinitionSpans(input, findFootnoteDefinitionSpans(input));
 	if (!spans.length) return input;
 
 	let out = "";
