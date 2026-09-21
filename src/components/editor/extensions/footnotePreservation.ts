@@ -1,7 +1,7 @@
 import { type MarkdownToken, Node } from "@tiptap/core";
 import { decodeFootnoteBridge, encodeFootnoteBridge } from "../markdown/footnote";
 
-const FOOTNOTE_REFERENCE_TOKEN_RE = /^\{\{glyph-footnote-ref:[0-9a-f]*\}\}/;
+const FOOTNOTE_ESCAPED_LITERAL_TOKEN_RE = /^\{\{glyph-footnote-esc:[0-9a-f]*\}\}/;
 const FOOTNOTE_DEFINITION_TOKEN_RE = /^\{\{glyph-footnote-def:[0-9a-f]*\}\}[\t ]*(?:\n|$)/;
 
 function rawAttr(attrs: Record<string, unknown> | null | undefined): string {
@@ -9,24 +9,24 @@ function rawAttr(attrs: Record<string, unknown> | null | undefined): string {
 	return typeof raw === "string" ? raw : "";
 }
 
-function footnoteIdFromRaw(raw: string): string {
-	return raw.match(/^\[\^([^\]\s]+)\]/)?.[1] ?? "";
+function textContentOfNode(node: { content?: Array<{ text?: string }> }): string {
+	return (node.content ?? []).map((child) => child.text ?? "").join("");
 }
 
-function decodeTokenRaw(token: MarkdownToken, kind: "ref" | "def"): string | null {
+function decodeTokenRaw(token: MarkdownToken, kind: "esc" | "def"): string | null {
 	const decoded = decodeFootnoteBridge((token.raw ?? token.text ?? "").toString().trim());
 	if (!decoded || decoded.kind !== kind) return null;
 	return decoded.raw;
 }
 
-export const FootnoteReferencePreservation = Node.create({
-	name: "footnoteReferencePreservation",
+export const FootnoteEscapedLiteral = Node.create({
+	name: "footnoteEscapedLiteral",
 	inline: true,
 	group: "inline",
 	atom: true,
 	selectable: true,
 	draggable: false,
-	markdownTokenName: "footnoteReferencePreservation",
+	markdownTokenName: "footnoteEscapedLiteral",
 	addAttributes() {
 		return {
 			raw: { default: "" },
@@ -34,39 +34,32 @@ export const FootnoteReferencePreservation = Node.create({
 	},
 	renderHTML({ node }) {
 		const raw = rawAttr(node.attrs);
-		return [
-			"span",
-			{
-				class: "footnoteRef",
-				"data-footnote-id": footnoteIdFromRaw(raw),
-			},
-			raw,
-		];
+		return ["span", { "data-footnote-literal": "" }, raw];
 	},
 	renderText({ node }) {
 		return rawAttr(node.attrs);
 	},
 	parseMarkdown(token: MarkdownToken, helpers) {
-		const raw = decodeTokenRaw(token, "ref");
+		const raw = decodeTokenRaw(token, "esc");
 		if (raw === null) return helpers.createTextNode((token.raw ?? token.text ?? "").toString());
-		return helpers.createNode("footnoteReferencePreservation", { raw });
+		return helpers.createNode("footnoteEscapedLiteral", { raw });
 	},
 	renderMarkdown(node) {
-		return encodeFootnoteBridge("ref", rawAttr(node.attrs));
+		return encodeFootnoteBridge("esc", rawAttr(node.attrs));
 	},
 	markdownTokenizer: {
-		name: "footnoteReferencePreservation",
+		name: "footnoteEscapedLiteral",
 		level: "inline",
 		start(src: string) {
-			return src.indexOf("{{glyph-footnote-ref:");
+			return src.indexOf("{{glyph-footnote-esc:");
 		},
 		tokenize(src: string) {
-			const match = src.match(FOOTNOTE_REFERENCE_TOKEN_RE);
+			const match = src.match(FOOTNOTE_ESCAPED_LITERAL_TOKEN_RE);
 			if (!match) return undefined;
 			const decoded = decodeFootnoteBridge(match[0]);
-			if (!decoded || decoded.kind !== "ref") return undefined;
+			if (!decoded || decoded.kind !== "esc") return undefined;
 			return {
-				type: "footnoteReferencePreservation",
+				type: "footnoteEscapedLiteral",
 				raw: match[0],
 				text: match[0],
 			};
@@ -77,36 +70,28 @@ export const FootnoteReferencePreservation = Node.create({
 export const FootnoteDefinitionPreservation = Node.create({
 	name: "footnoteDefinitionPreservation",
 	group: "block",
-	atom: true,
-	selectable: true,
-	draggable: false,
+	content: "text*",
+	marks: "",
+	code: true,
+	defining: true,
+	whitespace: "pre",
 	markdownTokenName: "footnoteDefinitionPreservation",
-	addAttributes() {
-		return {
-			raw: { default: "" },
-		};
+	parseHTML() {
+		return [{ tag: "pre[data-footnote-definition]", preserveWhitespace: "full" }];
 	},
-	renderHTML({ node }) {
-		const raw = rawAttr(node.attrs);
-		return [
-			"pre",
-			{
-				class: "footnoteDef",
-				"data-footnote-id": footnoteIdFromRaw(raw),
-			},
-			raw,
-		];
+	renderHTML() {
+		return ["pre", { class: "footnoteDef", "data-footnote-definition": "" }, 0];
 	},
 	renderText({ node }) {
-		return rawAttr(node.attrs);
+		return node.textContent;
 	},
 	parseMarkdown(token: MarkdownToken, helpers) {
 		const raw = decodeTokenRaw(token, "def");
 		if (raw === null) return helpers.createTextNode((token.raw ?? token.text ?? "").toString());
-		return helpers.createNode("footnoteDefinitionPreservation", { raw });
+		return helpers.createNode("footnoteDefinitionPreservation", {}, [helpers.createTextNode(raw)]);
 	},
 	renderMarkdown(node) {
-		return encodeFootnoteBridge("def", rawAttr(node.attrs));
+		return textContentOfNode(node);
 	},
 	markdownTokenizer: {
 		name: "footnoteDefinitionPreservation",

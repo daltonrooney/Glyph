@@ -57,7 +57,7 @@ export function findFootnoteCounterpartOffset(
 	return null;
 }
 
-export type FootnoteBridgeKind = "ref" | "def";
+export type FootnoteBridgeKind = "esc" | "def";
 
 export interface FootnoteDefinitionSpan {
 	start: number;
@@ -65,10 +65,10 @@ export interface FootnoteDefinitionSpan {
 	raw: string;
 }
 
-const FOOTNOTE_REFERENCE_RE = /^\[\^[^\]\s]+\]$/;
+const FOOTNOTE_ESCAPED_LITERAL_RE = /^\\\[\^[^\]\s]+\\\]$/;
 const FOOTNOTE_DEFINITION_START_RE = /^\[\^[^\]\s]+\]:/;
 const FOOTNOTE_CONTINUATION_RE = /^( {4}|\t)/;
-const FOOTNOTE_BRIDGE_RE = /^\{\{glyph-footnote-(ref|def):([0-9a-f]*)\}\}$/;
+const FOOTNOTE_BRIDGE_RE = /^\{\{glyph-footnote-(esc|def):([0-9a-f]*)\}\}$/;
 
 function bytesToHex(bytes: Uint8Array): string {
 	let hex = "";
@@ -89,7 +89,7 @@ function hexToBytes(hex: string): Uint8Array | null {
 }
 
 function isFootnoteBridgeSource(kind: FootnoteBridgeKind, raw: string): boolean {
-	if (kind === "ref") return FOOTNOTE_REFERENCE_RE.test(raw);
+	if (kind === "esc") return FOOTNOTE_ESCAPED_LITERAL_RE.test(raw);
 	const spans = findFootnoteDefinitionSpans(raw);
 	if (!spans.length) return false;
 
@@ -110,7 +110,7 @@ export function decodeFootnoteBridge(
 ): { kind: FootnoteBridgeKind; raw: string } | null {
 	const match = value.match(FOOTNOTE_BRIDGE_RE);
 	if (!match) return null;
-	const kind: FootnoteBridgeKind = match[1] === "def" ? "def" : "ref";
+	const kind: FootnoteBridgeKind = match[1] === "def" ? "def" : "esc";
 	const bytes = hexToBytes(match[2] ?? "");
 	if (!bytes) return null;
 

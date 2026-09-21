@@ -16,7 +16,6 @@ import {
 } from "../textHighlights";
 import { postprocessDetailsMarkdown, preprocessDetailsMarkdown } from "./detailsMarkdown";
 import {
-	FOOTNOTE_PATTERN,
 	type FootnoteDefinitionSpan,
 	decodeFootnoteBridge,
 	encodeFootnoteBridge,
@@ -61,7 +60,9 @@ function restoreEscapedBracketSyntax(input: string): string {
 	);
 }
 
-const FOOTNOTE_BRIDGE_TOKEN_RE = /\{\{glyph-footnote-(?:ref|def):[0-9a-f]*\}\}/g;
+const FOOTNOTE_BRIDGE_TOKEN_RE = /\{\{glyph-footnote-(?:esc|def):[0-9a-f]*\}\}/g;
+const ESCAPED_FOOTNOTE_LITERAL_RE = /\\\[\^[^\]\s]+\\\]/g;
+const ESCAPED_FOOTNOTE_RE = /\\\[\^((?:\\[^\n\]]|[^\\\]\s])+)\\\]/g;
 
 function hasOddLeadingBackslashes(text: string, index: number): boolean {
 	let backslashes = 0;
@@ -107,21 +108,42 @@ function protectFootnoteDefinitions(input: string): string {
 	return out;
 }
 
-function protectFootnoteReferences(input: string): string {
+/**
+ * Deliberately escaped footnote-like text must survive as written, so it is
+ * carried through the editor as an opaque token that the repair pass cannot see.
+ */
+function protectEscapedFootnoteLiterals(input: string): string {
 	return transformMarkdownOutsideCode(input, (text) =>
-		text.replace(FOOTNOTE_PATTERN, (match: string, _id: string, offset: number) =>
-			hasOddLeadingBackslashes(text, offset) ? match : encodeFootnoteBridge("ref", match),
+		text.replace(ESCAPED_FOOTNOTE_LITERAL_RE, (match: string, offset: number) =>
+			hasOddLeadingBackslashes(text, offset) ? match : encodeFootnoteBridge("esc", match),
 		),
 	);
 }
 
-/** Shield footnote syntax from Marked and the Tiptap text serializer. */
+/** Shield footnote syntax from Marked, which would otherwise consume definitions. */
 function preprocessFootnotes(input: string): string {
 	if (!input.includes("[^")) return input;
-	return protectFootnoteReferences(protectFootnoteDefinitions(input));
+	return protectEscapedFootnoteLiterals(protectFootnoteDefinitions(input));
 }
 
-function postprocessFootnotes(input: string): string {
+function unescapeFootnoteIdentifier(id: string): string {
+	return id.replace(/\\([\\`*_[\]~])/g, "$1");
+}
+
+/**
+ * The Tiptap text serializer escapes brackets and underscores in ordinary text,
+ * which turns a footnote written in the rich editor into `\[^id\]` on disk.
+ */
+function repairEscapedFootnotes(input: string): string {
+	if (!input.includes("\\[^")) return input;
+	return transformMarkdownOutsideCode(input, (text) =>
+		text.replace(ESCAPED_FOOTNOTE_RE, (match: string, id: string, offset: number) =>
+			hasOddLeadingBackslashes(text, offset) ? match : `[^${unescapeFootnoteIdentifier(id)}]`,
+		),
+	);
+}
+
+function restoreProtectedFootnotes(input: string): string {
 	if (!input.includes("{{glyph-footnote-")) return input;
 	return transformMarkdownOutsideCode(input, (text) =>
 		text.replace(
@@ -129,6 +151,10 @@ function postprocessFootnotes(input: string): string {
 			(match: string) => decodeFootnoteBridge(match)?.raw ?? match,
 		),
 	);
+}
+
+function postprocessFootnotes(input: string): string {
+	return restoreProtectedFootnotes(repairEscapedFootnotes(input));
 }
 
 const MARKDOWN_IMAGE_WITHOUT_TITLE_RE = /!\[([^\]\n]*)\]\(([^)\n"]*\s[^)\n"]*)\)/g;

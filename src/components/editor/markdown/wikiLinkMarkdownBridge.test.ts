@@ -27,6 +27,17 @@ function createMarkdownManager() {
 	});
 }
 
+function serializeTypedText(typed: string): string {
+	const manager = createMarkdownManager();
+	const doc = {
+		type: "doc",
+		content: typed
+			.split("\n\n")
+			.map((block) => ({ type: "paragraph", content: [{ type: "text", text: block }] })),
+	};
+	return postprocessMarkdownFromEditor(manager.serialize(doc));
+}
+
 function roundTripThroughEditor(input: string): string {
 	const manager = createMarkdownManager();
 	return postprocessMarkdownFromEditor(
@@ -141,10 +152,11 @@ describe("footnote preservation round trips", () => {
 });
 
 describe("footnote bridge codec", () => {
-	it("round-trips ascii references and definitions", () => {
-		expect(decodeFootnoteBridge(encodeFootnoteBridge("ref", "[^note]"))).toEqual({
-			kind: "ref",
-			raw: "[^note]",
+	it("round-trips escaped literals and definitions", () => {
+		const escaped = String.raw`\[^literal\]`;
+		expect(decodeFootnoteBridge(encodeFootnoteBridge("esc", escaped))).toEqual({
+			kind: "esc",
+			raw: escaped,
 		});
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", "[^note]: Definition."))).toEqual({
 			kind: "def",
@@ -153,9 +165,9 @@ describe("footnote bridge codec", () => {
 	});
 
 	it("round-trips non-ascii identifiers", () => {
-		const raw = "[^café-über-日本]";
-		const token = encodeFootnoteBridge("ref", raw);
-		expect(token).toMatch(/^\{\{glyph-footnote-ref:[0-9a-f]+\}\}$/);
+		const raw = String.raw`\[^café-über-日本\]`;
+		const token = encodeFootnoteBridge("esc", raw);
+		expect(token).toMatch(/^\{\{glyph-footnote-esc:[0-9a-f]+\}\}$/);
 		expect(decodeFootnoteBridge(token)?.raw).toBe(raw);
 	});
 
@@ -168,12 +180,14 @@ describe("footnote bridge codec", () => {
 	});
 
 	it("rejects malformed, odd-length, and unknown-kind tokens", () => {
-		expect(decodeFootnoteBridge("{{glyph-footnote-ref:zzzz}}")).toBeNull();
-		expect(decodeFootnoteBridge("{{glyph-footnote-ref:abc}}")).toBeNull();
-		expect(decodeFootnoteBridge("{{glyph-footnote-ref:}}")).toBeNull();
-		expect(decodeFootnoteBridge("{{glyph-footnote-note:5b5e615d}}")).toBeNull();
+		expect(decodeFootnoteBridge("{{glyph-footnote-esc:zzzz}}")).toBeNull();
+		expect(decodeFootnoteBridge("{{glyph-footnote-esc:abc}}")).toBeNull();
+		expect(decodeFootnoteBridge("{{glyph-footnote-esc:}}")).toBeNull();
+		expect(decodeFootnoteBridge("{{glyph-footnote-ref:5b5e615d}}")).toBeNull();
 		expect(decodeFootnoteBridge("not a token")).toBeNull();
-		expect(decodeFootnoteBridge(` ${encodeFootnoteBridge("ref", "[^note]")}`)).toBeNull();
+		expect(
+			decodeFootnoteBridge(` ${encodeFootnoteBridge("esc", String.raw`\[^literal\]`)}`),
+		).toBeNull();
 	});
 
 	it("accepts definitions that sit on consecutive lines", () => {
@@ -182,9 +196,10 @@ describe("footnote bridge codec", () => {
 	});
 
 	it("rejects payloads that do not match their claimed kind", () => {
-		expect(decodeFootnoteBridge(encodeFootnoteBridge("ref", "[^note]: Definition."))).toBeNull();
+		expect(decodeFootnoteBridge(encodeFootnoteBridge("esc", "[^note]: Definition."))).toBeNull();
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", "[^note]"))).toBeNull();
-		expect(decodeFootnoteBridge(encodeFootnoteBridge("ref", "text [^note] text"))).toBeNull();
+		expect(decodeFootnoteBridge(encodeFootnoteBridge("esc", "[^note]"))).toBeNull();
+		expect(decodeFootnoteBridge(encodeFootnoteBridge("esc", "text [^note] text"))).toBeNull();
 		expect(decodeFootnoteBridge(encodeFootnoteBridge("def", "  [^note]: Indented."))).toBeNull();
 		expect(
 			decodeFootnoteBridge(encodeFootnoteBridge("def", "[^a]: One.\n\nParagraph.\n\n[^b]: Two.")),
@@ -225,10 +240,13 @@ describe("findFootnoteDefinitionSpans", () => {
 });
 
 describe("footnote markdown bridge", () => {
-	it("protects references outside code", () => {
-		expect(preprocessMarkdownForEditor("Text[^note].")).toBe(
-			`Text${encodeFootnoteBridge("ref", "[^note]")}.`,
-		);
+	it("leaves plain references as editable text", () => {
+		expect(preprocessMarkdownForEditor("Text[^note].")).toBe("Text[^note].");
+	});
+
+	it("protects deliberately escaped literals so the repair pass cannot revive them", () => {
+		const escaped = String.raw`\[^literal\]`;
+		expect(preprocessMarkdownForEditor(escaped)).toBe(encodeFootnoteBridge("esc", escaped));
 	});
 
 	it("protects a complete definition block including continuation lines", () => {
@@ -238,18 +256,16 @@ describe("footnote markdown bridge", () => {
 		);
 	});
 
-	it("leaves code and deliberately escaped literals untouched", () => {
-		const md =
-			"`[^not-a-footnote]`\n\n```md\n[^not-a-footnote]: literal\n```\n\n" +
-			String.raw`\[^literal\]`;
+	it("leaves code untouched", () => {
+		const md = "`[^not-a-footnote]`\n\n```md\n[^not-a-footnote]: literal\n```";
 		expect(preprocessMarkdownForEditor(md)).toBe(md);
 	});
 
 	it("restores protected footnotes and keeps lookalike tokens literal", () => {
 		const md = "Text[^note].\n\n[^note]: Definition.";
 		expect(postprocessMarkdownFromEditor(preprocessMarkdownForEditor(md))).toBe(md);
-		expect(postprocessMarkdownFromEditor("{{glyph-footnote-ref:zz}} stays")).toBe(
-			"{{glyph-footnote-ref:zz}} stays",
+		expect(postprocessMarkdownFromEditor("{{glyph-footnote-esc:zz}} stays")).toBe(
+			"{{glyph-footnote-esc:zz}} stays",
 		);
 	});
 });
@@ -258,7 +274,7 @@ describe("footnote preservation nodes", () => {
 	function findNodeByType(
 		value: unknown,
 		type: string,
-	): { type?: string; attrs?: Record<string, unknown> } | null {
+	): { type?: string; attrs?: Record<string, unknown>; content?: unknown[] } | null {
 		if (!value || typeof value !== "object") return null;
 		const node = value as {
 			type?: string;
@@ -273,20 +289,47 @@ describe("footnote preservation nodes", () => {
 		return null;
 	}
 
-	it("parses references into atomic nodes holding the original source", () => {
+	it("keeps plain references as editable text rather than a node", () => {
 		const manager = createMarkdownManager();
 		const json = manager.parse(preprocessMarkdownForEditor("Text[^my_note.v2-1]."));
-		expect(findNodeByType(json, "footnoteReferencePreservation")?.attrs).toEqual({
-			raw: "[^my_note.v2-1]",
+		expect(findNodeByType(json, "footnoteEscapedLiteral")).toBeNull();
+		expect(JSON.stringify(json)).toContain("[^my_note.v2-1]");
+	});
+
+	it("parses deliberately escaped literals into a preservation node", () => {
+		const escaped = String.raw`\[^literal\]`;
+		const manager = createMarkdownManager();
+		const json = manager.parse(preprocessMarkdownForEditor(escaped));
+		expect(findNodeByType(json, "footnoteEscapedLiteral")?.attrs).toEqual({
+			raw: escaped,
 		});
 	});
 
-	it("parses definitions into atomic nodes holding the complete original block", () => {
+	it("parses definitions into an editable block holding the complete original text", () => {
 		const definition = "[^long]: First line.\n    Continued with **Markdown**.";
 		const manager = createMarkdownManager();
 		const json = manager.parse(preprocessMarkdownForEditor(`Intro.\n\n${definition}`));
-		expect(findNodeByType(json, "footnoteDefinitionPreservation")?.attrs).toEqual({
-			raw: definition,
+		const node = findNodeByType(json, "footnoteDefinitionPreservation");
+		expect(node?.content).toEqual([{ type: "text", text: definition }]);
+	});
+});
+
+describe("footnotes typed directly in the rich editor", () => {
+	const typed: Array<[string, string]> = [
+		["reference", "Text[^footnote-1] here."],
+		["identifier with underscores", "Text[^my_note.v2-1] here."],
+		["definition", "[^footnote-1]: This is the text for footnote one."],
+		["reference and definition", "Text[^footnote-1].\n\n[^footnote-1]: Footnote text."],
+	];
+
+	for (const [name, input] of typed) {
+		it(`writes a typed ${name} without escaping`, () => {
+			expect(serializeTypedText(input)).toBe(input);
 		});
+	}
+
+	it("keeps a typed footnote stable when reloaded and saved again", () => {
+		const typedOutput = serializeTypedText("Text[^footnote-1].\n\n[^footnote-1]: Footnote text.");
+		expect(roundTripThroughEditor(typedOutput)).toBe(typedOutput);
 	});
 });
